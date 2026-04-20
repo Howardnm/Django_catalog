@@ -1,0 +1,158 @@
+{% extends "apps/app_catalog/layouts/base.html" %}
+{% load static %}
+
+{% block title %}SUNWILL | 材料产品电子手册{% endblock %}
+
+{% block extra_css %}
+<style>
+    .showcase-container {
+        max-width: 1000px;
+        margin: 2rem auto;
+    }
+    .hero-card {
+        background: #fff;
+        border: none;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+        position: relative;
+    }
+    .hero-banner {
+        height: 8px;
+        background: linear-gradient(90deg, var(--brand-blue), #00a3ff);
+    }
+    .hero-content {
+        padding: 5rem 3rem;
+        text-align: center;
+    }
+    .hero-title {
+        font-size: 2.8rem;
+        font-weight: 800;
+        color: #1a1a1a;
+        letter-spacing: -1px;
+        margin-bottom: 1.5rem;
+    }
+    .hero-subtitle {
+        font-size: 1.25rem;
+        color: #555;
+        max-width: 700px;
+        margin: 0 auto 3rem;
+        line-height: 1.7;
+    }
+    .btn-enter-showroom {
+        background: var(--brand-blue);
+        color: white;
+        padding: 1.2rem 3.5rem;
+        font-size: 1.15rem;
+        font-weight: 600;
+        border-radius: 50px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
+        box-shadow: 0 4px 15px rgba(0, 84, 166, 0.2);
+    }
+    .btn-enter-showroom:hover {
+        background: #004080;
+        color: white;
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(0, 84, 166, 0.3);
+    }
+    .industry-tags {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        margin-top: 4rem;
+        flex-wrap: wrap;
+    }
+    .industry-tag {
+        font-size: 0.85rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: #999;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .industry-tag i {
+        color: var(--brand-blue);
+        font-size: 1.2rem;
+    }
+    .stats-footer {
+        background: #f8fafc;
+        padding: 2rem;
+        border-top: 1px solid #f1f5f9;
+        display: flex;
+        justify-content: space-around;
+        text-align: center;
+    }
+    .stat-val {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--brand-blue);
+        display: block;
+    }
+    .stat-label {
+        font-size: 0.75rem;
+        color: #64748b;
+        text-transform: uppercase;
+        font-weight: 600;
+        margin-top: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container showcase-container">
+    <div class="hero-card">
+        <div class="hero-banner"></div>
+        <div class="hero-content">
+            <div class="mb-4">
+                <span class="badge bg-blue-lt px-3 py-2 fw-bold text-uppercase" style="letter-spacing: 1px;">Innovative Polymers</span>
+            </div>
+            <h1 class="hero-title">顺威赛特 ● 材料产品电子手册</h1>
+            <p class="hero-subtitle">
+                作为领先的聚合物解决方案专家，我们致力于为全球客户提供从材料研发到加工成型的全链条技术支持。在这里，您可以直观地探索我们的改性技术与行业应用方案。
+            </p>
+
+            <div>
+                <a href="{% url 'app_catalog:home' %}" class="btn-enter-showroom">
+                    <span>打开产品手册探索</span>
+                    <i class="ti ti-chevron-right"></i>
+                </a>
+            </div>
+
+            <div class="industry-tags">
+                <span class="industry-tag"><i class="ti ti-car"></i> 汽车工业</span>
+                <span class="industry-tag"><i class="ti ti-device-laptop"></i> 消费电子</span>
+                <span class="industry-tag"><i class="ti ti-plug"></i> 电气工程</span>
+                <span class="industry-tag"><i class="ti ti-medical-cross"></i> 医疗健康</span>
+            </div>
+        </div>
+
+        <div class="stats-footer">
+            <div>
+                <span class="stat-val">500+</span>
+                <span class="stat-label">注册牌号</span>
+            </div>
+            <div>
+                <span class="stat-val">20+</span>
+                <span class="stat-label">行业应用</span>
+            </div>
+            <div>
+                <span class="stat-val">24/7</span>
+                <span class="stat-label">在线技术支持</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4 text-center">
+        <p class="text-muted small">
+            &copy; {% now "Y" %} SUNWILL New Material Technology. All rights reserved. <br>
+            <span class="text-uppercase" style="font-size: 9px; opacity: 0.6;">Professional Industrial Material Solutions</span>
+        </p>
+    </div>
+</div>
+{% endblock %}

@@ -14,10 +14,12 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.contrib import admin
 from django.urls import path, include
+from django.views.generic import TemplateView
+from app_catalog.views.home import HomePageView # Import the new HomePageView
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    # Removed path('admin/', admin.site.urls) as per request to hide/restrict admin access.
+    path('', HomePageView.as_view(), name='home'), # Set the new cover page as the homepage
     path('catalog/', include('app_catalog.urls')),
 ]

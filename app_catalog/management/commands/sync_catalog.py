@@ -1,106 +1,125 @@
-import sys
-import importlib
+import logging
 from django.core.management.base import BaseCommand
-from ...models import CatalogCategory, CatalogProduct
-from ...services.material_api import client # 更新导入路径
-import requests
+from django.db import transaction
 from django.conf import settings
 
-# 强制重新加载模块，确保运行的是最新代码
-if 'app_catalog.services.material_api' in sys.modules:
-    importlib.reload(sys.modules['app_catalog.services.material_api'])
+# 使用绝对导入，防止在 management 命令中出现路径解析错误
+from app_catalog.models.catalog import CatalogCategory, CatalogProduct, MirrorScenario, MirrorCharacteristic
+from app_catalog.services.material_api import client
+
+logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
-    help = '通过 API 从远程材料库同步基础数据（分类与产品索引）'
+    """
+    运行命令：python manage.py sync_catalog
+    功能：从主系统 API 全量抓取并构建本地关系型镜像。
+    安全：自动使用 settings.INTERNAL_API_TOKEN 进行鉴权。
+    """
+    help = '从主系统 API 全量同步物料、场景、特性及分类数据'
 
     def handle(self, *args, **options):
-        print("\n[DEBUG sync_catalog] --- 开始 API 同步任务 ---")
-        self.stdout.write(self.style.MIGRATE_HEADING("开始 API 同步任务..."))
-
-        base_url = getattr(settings, 'REMOTE_API_BASE_URL', 'http://127.0.0.1:8000/api/material/')
-        self.stdout.write(f"使用的远程 API 基地址: {base_url}")
-        if not base_url.startswith('http'):
-            self.stdout.write(self.style.ERROR("错误: REMOTE_API_BASE_URL 配置不正确。"))
-            return
+        self.stdout.write(self.style.MIGRATE_HEADING("\n🚀 开始全量镜像同步任务 (4D 安全架构接入)..."))
         
-        # 检查 INTERNAL_API_TOKEN 是否配置
-        api_token = getattr(settings, 'INTERNAL_API_TOKEN', None)
-        if not api_token:
-            self.stdout.write(self.style.ERROR("错误: settings.INTERNAL_API_TOKEN 未配置，API 请求可能失败。"))
-            # return # 不直接返回，让它尝试请求，看是否是 AllowAny
-
-        self.stdout.write("正在从 API 获取材料类型...")
+        # 1. 同步公共维度
+        self._sync_scenarios()
         self._sync_categories()
+        
+        # 2. 同步物料主档 (含关系链)
+        self._sync_products_paged()
+        
+        self.stdout.write(self.style.SUCCESS('\n✅ 镜像同步任务全部完成！'))
 
-        self.stdout.write("正在从 API 获取物料列表（支持分页）...")
-        self._sync_products()
-
-        self.stdout.write(self.style.SUCCESS('API 同步任务全部完成！'))
+    def _sync_scenarios(self):
+        self.stdout.write("   -> 正在同步应用场景数据...")
+        data = client.get_all_scenarios()
+        # 处理 DRF 返回的列表或带 results 的字典
+        scenarios = data.get('results', []) if isinstance(data, dict) else (data or [])
+        
+        count = 0
+        for s in scenarios:
+            MirrorScenario.objects.update_or_create(
+                remote_id=s['id'], 
+                defaults={'name': s['name']}
+            )
+            count += 1
+        self.stdout.write(f"      [OK] 已同步 {count} 个场景")
 
     def _sync_categories(self):
-        """同步物料类型分类"""
-        url_endpoint = 'types/'
+        self.stdout.write("   -> 正在同步材质分类 (MaterialType)...")
+        # 直接通过底层执行器获取
+        data = client._execute_request('GET', 'types/')
+        types = data.get('results', []) if data else []
+        
+        for t in types:
+            CatalogCategory.objects.update_or_create(
+                remote_type_id=t['id'], 
+                defaults={'name': t['name'], 'is_active': True}
+            )
+        self.stdout.write(f"      [OK] 已同步 {len(types)} 个分类")
+
+    def _sync_products_paged(self):
+        self.stdout.write("   -> 正在同步物料主档及关系链 (支持 API 分页)...")
+        
+        # 初始获取第一页
+        response_data = client.get_paged_materials()
         page_count = 0
-        current_page_url = url_endpoint
-        while current_page_url:
+        
+        while response_data:
             page_count += 1
-            self.stdout.write(f"  - 正在获取分类第 {page_count} 页...")
-            data = client._get(current_page_url) # client._get 已经处理了 headers
-            
-            if data is None or 'results' not in data:
-                self.stdout.write(self.style.ERROR(f"    分类 API 返回空数据或格式不正确，停止同步。"))
-                break
+            results = response_data.get('results', [])
+            self.stdout.write(f"      正在处理第 {page_count} 页数据 ({len(results)} 条)...")
 
-            for mt in data['results']:
-                category, created = CatalogCategory.objects.update_or_create(
-                    remote_type_id=mt['id'],
-                    defaults={
-                        'name': mt['name'], 
-                        'is_active': True
-                    }
-                )
-                status = "创建" if created else "更新"
-                self.stdout.write(self.style.SUCCESS(f'      [+] {status}分类: {category.name}'))
-            
-            current_page_url = data.get('next')
-
-    def _sync_products(self):
-        """同步物料产品索引"""
-        url_endpoint = 'materials/'
-        page_count = 0
-        current_page_url = url_endpoint
-        while current_page_url:
-            page_count += 1
-            self.stdout.write(f"  - 正在获取物料第 {page_count} 页...")
-            data = client.get_material_list() # client.get_material_list 已经处理了 headers
-            
-            if data is None or 'results' not in data:
-                self.stdout.write(self.style.ERROR(f"    物料 API 返回空数据或格式不正确，停止同步。"))
-                break
-
-            for mat in data['results']:
+            for mat in results:
                 try:
-                    local_category = CatalogCategory.objects.get(remote_type_id=mat['category']['id'])
-                    product, created = CatalogProduct.objects.update_or_create(
-                        remote_material_id=mat['id'],
-                        defaults={
-                            'category': local_category,
-                            'display_name': mat['grade_name'],
-                        }
-                    )
-                    status = "同步新产品" if created else "更新产品索引"
-                    self.stdout.write(self.style.SUCCESS(f'      [+] {status}: {product.display_name}'))
-                except CatalogCategory.DoesNotExist:
-                    self.stdout.write(self.style.ERROR(f'      [!] 跳过 {mat["grade_name"]}: 本地未找到分类'))
-            
-            current_page_url = data.get('next')
+                    with transaction.atomic():
+                        # A. 确保分类本地存在
+                        remote_cat = mat.get('category', {})
+                        if not remote_cat:
+                            continue
+                            
+                        local_cat, _ = CatalogCategory.objects.get_or_create(
+                            remote_type_id=remote_cat['id'],
+                            defaults={'name': remote_cat.get('name', '未分类')}
+                        )
 
-    # _direct_get 方法不再需要，因为 client._get 已经兼容了完整 URL
-    # def _direct_get(self, url):
-    #     try:
-    #         response = requests.get(url, timeout=10)
-    #         response.raise_for_status()
-    #         return response.json()
-    #     except Exception as e:
-    #         self.stdout.write(self.style.ERROR(f"    分页请求失败: {e}"))
-    #         return None
+                        # B. 更新物料主表 (增加 is_published 支持)
+                        product, _ = CatalogProduct.objects.update_or_create(
+                            remote_material_id=mat['id'],
+                            defaults={
+                                'display_name': mat['grade_name'],
+                                'category': local_cat,
+                                'description': mat.get('description', ''),
+                                'is_published': mat.get('is_published', False)
+                            }
+                        )
+
+                        # C. 处理多对多关系镜像 (场景)
+                        sce_objs = []
+                        for s in mat.get('scenarios', []):
+                            obj, _ = MirrorScenario.objects.get_or_create(
+                                remote_id=s['id'], 
+                                defaults={'name': s['name']}
+                            )
+                            sce_objs.append(obj)
+                        product.scenarios.set(sce_objs)
+
+                        # D. 处理多对多关系镜像 (特征)
+                        char_objs = []
+                        for c in mat.get('characteristics', []):
+                            obj, _ = MirrorCharacteristic.objects.update_or_create(
+                                remote_id=c['id'], 
+                                defaults={'name': c['name']}
+                            )
+                            char_objs.append(obj)
+                        product.characteristics.set(char_objs)
+
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(f"      [!] 跳过牌号 {mat.get('grade_name')}: {e}"))
+
+            # 检查是否有下一页
+            next_link = response_data.get('next')
+            if next_link:
+                # 再次调用 API 获取下一页，Service 内部会自动处理绝对 URL
+                response_data = client._execute_request('GET', next_link)
+            else:
+                response_data = None

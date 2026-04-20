@@ -1,11 +1,11 @@
 import json
 import logging
+import traceback
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django.conf import settings # 导入 settings
-from ..models import CatalogCategory, CatalogProduct
-from ..services.material_api import client
+from django.conf import settings
+from .handlers import WebhookHandler
 
 logger = logging.getLogger(__name__)
 
@@ -13,96 +13,47 @@ logger = logging.getLogger(__name__)
 @require_http_methods(["POST"])
 def material_webhook_receiver(request):
     """
-    完善后的 Webhook 接收端：支持安全校验、自动补全分类
+    通用 Webhook 接收网关。
     """
-    # 【新增】安全性校验：验证 Webhook Secret
+    # 1. 安全性检查
     webhook_secret = request.headers.get('X-Webhook-Secret')
-    expected_secret = getattr(settings, 'WEBHOOK_SECRET_KEY', None)
-    
-    if not expected_secret or webhook_secret != expected_secret:
-        logger.warning(f"Webhook 拒绝访问：无效的 Secret Key。来源IP: {request.META.get('REMOTE_ADDR')}")
-        return JsonResponse({'status': 'error', 'message': 'Unauthorized'}, status=401)
+    if not webhook_secret or webhook_secret != getattr(settings, 'WEBHOOK_SECRET_KEY', ''):
+        return JsonResponse({'status': 'error', 'message': 'Unauthorized (Secret mismatch)'}, status=401)
 
     try:
         payload = json.loads(request.body)
         event_type = payload.get('event_type')
+        model_type = payload.get('model')
         data = payload.get('data', {})
-        remote_id = data.get('id')
 
-        if not event_type or not remote_id:
+        if not event_type or not data:
             return JsonResponse({'status': 'error', 'message': 'Invalid payload structure'}, status=400)
 
-        # 分流处理
-        if event_type.startswith('material_'):
-            return _handle_material_event(event_type, remote_id)
-        elif event_type.startswith('type_'):
-            return _handle_type_event(event_type, remote_id)
-        
-        return JsonResponse({'status': 'error', 'message': 'Unknown event type'}, status=400)
+        # 2. 逻辑分发 (基于对象模块化处理器)
+        # A. 会员同步
+        if model_type == 'member' and event_type == 'member_sync':
+            return WebhookHandler.handle_member_sync(data)
+
+        # B. 基础维度更新 (场景/特征)
+        if event_type == 'dimension_updated':
+            return WebhookHandler.handle_dimension_update(model_type, data)
+
+        # C. 物料主数据同步
+        remote_id = data.get('id')
+        if event_type == 'material_deleted':
+            return WebhookHandler.handle_material_delete(remote_id)
+
+        if event_type in ['material_created', 'material_updated']:
+            # 此处最容易抛出 500 错误，进行拦截
+            return WebhookHandler.handle_material_save(remote_id)
+            
+        return JsonResponse({'status': 'success', 'message': f'Event {event_type} ignored'})
 
     except Exception as e:
-        logger.exception(f"Webhook 严重处理异常: {str(e)}")
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
-
-def _get_or_sync_category(remote_category_id):
-    try:
-        category = CatalogCategory.objects.get(remote_type_id=remote_category_id)
-        return category
-    except CatalogCategory.DoesNotExist:
-        logger.info(f"本地缺失分类 ID {remote_category_id}，正在尝试从远程 API 同步...")
-        remote_type_data = client._get(f'types/{remote_category_id}/')
-        if remote_type_data:
-            category, created = CatalogCategory.objects.get_or_create(
-                remote_type_id=remote_category_id,
-                defaults={
-                    'name': remote_type_data.get('name', '未命名分类'),
-                    'is_active': True
-                }
-            )
-            return category
-    return None
-
-def _handle_material_event(event_type, remote_id):
-    if event_type == 'material_deleted':
-        CatalogProduct.objects.filter(remote_material_id=remote_id).delete()
-        return JsonResponse({'status': 'success', 'action': 'deleted'})
-
-    remote_data = client.get_material_detail(remote_id)
-    if not remote_data:
-        return JsonResponse({'status': 'error', 'message': 'Remote data fetch failed'}, status=404)
-
-    remote_cat_id = remote_data.get('category', {}).get('id')
-    local_category = _get_or_sync_category(remote_cat_id)
-    
-    if not local_category:
-        return JsonResponse({'status': 'error', 'message': f'Category {remote_cat_id} synchronization failed'}, status=500)
-
-    product, created = CatalogProduct.objects.update_or_create(
-        remote_material_id=remote_id,
-        defaults={
-            'category': local_category,
-            'display_name': remote_data.get('grade_name', '未知牌号'),
-        }
-    )
-    
-    return JsonResponse({
-        'status': 'success', 
-        'action': 'synced', 
-        'is_new': created,
-        'display_name': product.display_name
-    })
-
-def _handle_type_event(event_type, remote_id):
-    if event_type == 'type_deleted':
-        CatalogCategory.objects.filter(remote_type_id=remote_id).delete()
-        return JsonResponse({'status': 'success', 'action': 'category_deleted'})
-
-    remote_type_data = client._get(f'types/{remote_id}/')
-    if remote_type_data:
-        category, created = CatalogCategory.objects.update_or_create(
-            remote_type_id=remote_id,
-            defaults={'name': remote_type_data.get('name')}
-        )
-        return JsonResponse({'status': 'success', 'action': 'category_synced', 'is_new': created})
-    
-    return JsonResponse({'status': 'error', 'message': 'Remote category data fetch failed'}, status=404)
+        # 核心增强：打印完整堆栈到子系统日志，并将简短错误信息回传主系统
+        stack_trace = traceback.format_exc()
+        logger.error(f"Webhook Gateway Internal Error: {str(e)}\n{stack_trace}")
+        return JsonResponse({
+            'status': 'error', 
+            'message': f"Catalog system error: {str(e)}"
+        }, status=500)

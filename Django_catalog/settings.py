@@ -25,7 +25,18 @@ SECRET_KEY = 'django-insecure-6sm(k(j2=3cvie=@$6)(2q#3f6w995h!$6mj74rpj!glftdp(e
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# 允许所有ip访问
+ALLOWED_HOSTS = ['*']
+
+# CSRF Trusted Origins for Production
+CSRF_TRUSTED_ORIGINS = [
+    'https://catalog.bueess.top:9443',
+]
+
+# Secure settings for HTTPS
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
 
 
 # Application definition

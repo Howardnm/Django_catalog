@@ -30,7 +30,9 @@ ALLOWED_HOSTS = ['*']
 
 # CSRF Trusted Origins for Production
 CSRF_TRUSTED_ORIGINS = [
-    'https://catalog.bueess.top:9443',
+    'http://192.168.123.18:8080',  # 你的域名（http协议）
+    'https://www.yourdomain.com',  # 若开启了HTTPS，必须添加对应https域名
+    'http://你的服务器公网IP',  # 若用IP访问，也需添加
 ]
 
 # Secure settings for HTTPS
